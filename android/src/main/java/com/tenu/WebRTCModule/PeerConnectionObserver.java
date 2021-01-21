@@ -1,4 +1,4 @@
-package com.oney.WebRTCModule;
+package com.tenu.WebRTCModule;
 
 import java.io.UnsupportedEncodingException;
 import java.lang.ref.SoftReference;
@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
@@ -30,6 +31,7 @@ import org.webrtc.MediaStream;
 import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.RtpReceiver;
+import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
 import org.webrtc.StatsObserver;
 import org.webrtc.StatsReport;
@@ -48,14 +50,14 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     private final static String TAG = WebRTCModule.TAG;
 
     private final SparseArray<DataChannel> dataChannels
-        = new SparseArray<DataChannel>();
+            = new SparseArray<DataChannel>();
     private final int id;
     private PeerConnection peerConnection;
     final List<MediaStream> localStreams;
     final Map<String, MediaStream> remoteStreams;
     final Map<String, MediaStreamTrack> remoteTracks;
     final boolean isUnifiedPlan;
-    final VideoTrackAdapter videoTrackAdapters;
+    private final VideoTrackAdapter videoTrackAdapters; // 굳이 private일 필요있을까?
     private final WebRTCModule webRTCModule;
 
     /**
@@ -65,7 +67,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
      * buffer in an attempt to improve performance.
      */
     private SoftReference<StringBuilder> statsToJSONStringBuilder
-        = new SoftReference<>(null);
+            = new SoftReference<>(null);
 
     PeerConnectionObserver(WebRTCModule webRTCModule, int id, boolean isUnifiedPlan) {
         this.webRTCModule = webRTCModule;
@@ -114,6 +116,41 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         return localStreams.remove(localStream);
     }
 
+    /**
+     * Adds a specific local <tt>MediaStream</tt> to the associated
+     * <tt>PeerConnection</tt>.
+     *
+     * @param localStream the local <tt>MediaStream</tt> to add to the
+     *                    associated <tt>PeerConnection</tt>
+     * @return <tt>true</tt> if the specified <tt>localStream</tt> was added to
+     * the associated <tt>PeerConnection</tt>; otherwise, <tt>false</tt>
+     */
+    RtpSender addTrack(MediaStreamTrack mediaStreamTrack) {
+        if (peerConnection != null) {
+            RtpSender sender = peerConnection.addTrack(mediaStreamTrack);
+            return sender;
+        }
+        return null;
+    }
+
+    /**
+     * Removes a specific local <tt>RtpSender</tt> from the associated
+     * <tt>PeerConnection</tt>.
+     *
+     * @param rtpSender the local <tt>RtpSender</tt> from the associated
+     * <tt>PeerConnection</tt>
+     * @return <tt>true</tt> if removing the specified <tt>rtpSender</tt> from
+     * this instance resulted in a modification of its internal list of local
+     * <tt>RtpSender</tt>s; otherwise, <tt>false</tt>
+     */
+    boolean removeTrack(RtpSender rtpSender) {
+        if (peerConnection != null) {
+            boolean result = peerConnection.removeTrack(rtpSender);
+            return true;
+        }
+        return false;
+    }
+
     String addTransceiver(MediaStreamTrack.MediaType mediaType, RtpTransceiver.RtpTransceiverInit init) {
         if (peerConnection == null) {
             throw new Error("Impossible");
@@ -135,7 +172,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     }
 
     RtpTransceiver getTransceiver(String id) {
-        for(RtpTransceiver transceiver: this.peerConnection.getTransceivers()) {
+        for (RtpTransceiver transceiver : this.peerConnection.getTransceivers()) {
             if (transceiver.getSender().id().equals(id)) {
                 return transceiver;
             }
@@ -390,8 +427,8 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         String streamReactTag = getReactTagForStream(mediaStream);
         if (streamReactTag == null) {
             Log.w(TAG,
-                "onRemoveStream - no remote stream for id: "
-                    + mediaStream.getId());
+                    "onRemoveStream - no remote stream for id: "
+                            + mediaStream.getId());
             return;
         }
 
@@ -436,7 +473,7 @@ class PeerConnectionObserver implements PeerConnection.Observer {
         // unregister, so the observer is registered here and is never
         // unregistered
         dataChannel.registerObserver(
-            new DataChannelObserver(webRTCModule, id, dcId, dataChannel));
+                new DataChannelObserver(webRTCModule, id, dcId, dataChannel));
     }
 
     @Override
@@ -457,13 +494,58 @@ class PeerConnectionObserver implements PeerConnection.Observer {
     @Override
     public void onAddTrack(final RtpReceiver receiver, final MediaStream[] mediaStreams) {
         Log.d(TAG, "onAddTrack");
-        if(isUnifiedPlan){
+        if (isUnifiedPlan) {
             MediaStreamTrack track = receiver.track();
-            if(track != null){
-                if(track.kind().equals(MediaStreamTrack.VIDEO_TRACK_KIND)){
+            if (track != null) {
+                if (track.kind().equals(MediaStreamTrack.VIDEO_TRACK_KIND)) {
                     videoTrackAdapters.addAdapter(UUID.randomUUID().toString(), (VideoTrack) track);
                 }
                 remoteTracks.put(track.id(), track);
+            }
+        }
+    }
+
+    @Override
+    public void onTrack(RtpTransceiver transceiver){
+        if(isUnifiedPlan){
+            MediaStreamTrack track = transceiver.getReceiver().track();
+            if(track != null){
+                WritableMap trackInfo = Arguments.createMap();
+                if(track.kind().equals(MediaStreamTrack.VIDEO_TRACK_KIND)){
+                    String streamReactTag = UUID.randomUUID().toString();
+                    videoTrackAdapters.addAdapter(streamReactTag, (VideoTrack) track);
+
+                    if(transceiver.getSender().track() == null){
+                        MediaStreamTrack videoTrack = webRTCModule.getLocalTrackByType("video");
+
+                        if(videoTrack != null){
+                            transceiver.getSender().setTrack(videoTrack, false);
+                            transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV);
+                            this.onRenegotiationNeeded();
+                        }
+                    }
+                }else {
+                    if(transceiver.getSender().track() == null) {
+                        MediaStreamTrack audioTrack = webRTCModule.getLocalTrackByType("audio");
+
+                        if(audioTrack != null){
+                            transceiver.getSender().setTrack(audioTrack, false);
+                            transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV);
+                        }
+                    }
+                }
+
+                remoteTracks.put(track.id(), track);
+
+                trackInfo.putInt("id", id);
+                trackInfo.putString("trackId", track.id());
+                trackInfo.putString("kind", track.kind());
+                trackInfo.putString("label", track.id());
+                trackInfo.putBoolean("remote", true);
+                trackInfo.putBoolean("enabled", track.enabled());
+                trackInfo.putString("readyState", track.state().toString().toLowerCase());
+
+                webRTCModule.sendEvent("peerConnectionAddedTrack", trackInfo);
             }
         }
     }

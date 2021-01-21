@@ -1,4 +1,4 @@
-package com.oney.WebRTCModule;
+package com.tenu.WebRTCModule;
 
 import androidx.annotation.Nullable;
 import android.util.Log;
@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 
 import org.webrtc.*;
@@ -454,6 +456,10 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         return getUserMediaImpl.getTrack(trackId);
     }
 
+    MediaStreamTrack getLocalTrackByType(String type) {
+        return getUserMediaImpl.getTrackByType(type);
+    }
+
     private static MediaStreamTrack getLocalTrack(
             MediaStream localStream,
             String trackId) {
@@ -536,13 +542,13 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             Log.d(TAG, "mediaStreamAddTrack() stream || track is null");
             return;
         }
-            String kind = track.kind();
-            if ("audio".equals(kind)) {
-                stream.addTrack((AudioTrack) track);
-            } else if ("video".equals(kind)) {
-                stream.addTrack((VideoTrack) track);
-            }
+        String kind = track.kind();
+        if ("audio".equals(kind)) {
+            stream.addTrack((AudioTrack) track);
+        } else if ("video".equals(kind)) {
+            stream.addTrack((VideoTrack) track);
         }
+    }
 
     @ReactMethod
     public void mediaStreamRemoveTrack(String streamId, String trackId) {
@@ -578,6 +584,10 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             Log.d(TAG, "mediaStreamRelease() stream is null");
             return;
         }
+
+        // Remove and Dispose any tracks ourselves before calling stream.dispose().
+        // 위 문장으로 시작하는 부분은 M87에서 사라짐.
+
 
         localStreams.remove(id);
 
@@ -650,19 +660,33 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void peerConnectionAddStream(String streamId, int id) {
+    public void peerConnectionAddStream(String streamId, int id, Callback callback) { // callback 추가
         ThreadUtils.runOnExecutor(() ->
-                peerConnectionAddStreamAsync(streamId, id));
+                peerConnectionAddStreamAsync(streamId, id, callback));
     }
 
-    private void peerConnectionAddStreamAsync(String streamId, int id) {
+    private void peerConnectionAddStreamAsync(String streamId, int id, Callback callback) {
         MediaStream mediaStream = localStreams.get(streamId);
         if (mediaStream == null) {
             Log.d(TAG, "peerConnectionAddStream() mediaStream is null");
             return;
         }
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
-        if (pco == null || !pco.addStream(mediaStream)) {
+        if (pco != null) { //FLAG: unified plan일 경우 addStream을 허용하지 않도록 예외처리
+            if (pco.isUnifiedPlan == false) {
+                boolean result = pco.addStream(mediaStream);
+                if (result == true) {
+                    callback.invoke(true);
+                } else {
+                    callback.invoke(false, "add stream failed");
+                    Log.e(TAG, "peerConnectionAddStream() failed");
+                }
+            } else {
+                callback.invoke(false, "Unified Plan mode does not allow AddStream");
+                Log.e(TAG, "Unified Plan mode does not allow AddStream");
+            }
+        } else {
+            callback.invoke(false, "pco == null");
             Log.e(TAG, "peerConnectionAddStream() failed");
         }
     }
@@ -685,11 +709,154 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
     }
 
+    //FLAG webrtc2를 보고 추가한 코드
+    @ReactMethod
+    public void peerConnectionAddTrack(String trackId, int id, Callback callback) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionAddTrackAsync(trackId, id, callback));
+    }
+
+    private void peerConnectionAddTrackAsync(String trackId, int id, Callback callback) {
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco != null) {
+            if (pco.isUnifiedPlan == true) {
+                //只能添加本地轨道
+                MediaStreamTrack mediaStreamTrack = getLocalTrack(trackId);
+                if (mediaStreamTrack == null) {
+                    Log.d(TAG, "peerConnectionAddTrack() mediaStreamTrack is null(local)");
+                    return;
+                }
+                try {
+                    //查找轨道是否有对应的（RtpSender）了
+                    String addTrackId = mediaStreamTrack.id();
+                    RtpSender sender = null;
+                    for (RtpSender rtpSender : pco.getPeerConnection().getSenders()) {
+                        if (rtpSender.track() != null) {
+                            if (rtpSender.track().id().equalsIgnoreCase(addTrackId)) {
+                                sender = rtpSender;
+                                break;
+                            }
+                        }
+                    }
+                    if (sender == null) {
+                        //没有创建收发器，就添加轨道，有收发器，轨道就添加到 RtpSender 里
+                        if (pco.getPeerConnection().getTransceivers().size() <= 0) {
+                            sender = pco.addTrack(mediaStreamTrack);
+                        } else {
+                            for (RtpTransceiver transceiver : pco.getPeerConnection().getTransceivers()) {
+                                if (transceiver.getReceiver().track() != null) {
+                                    if (transceiver.getSender().track() == null && transceiver.getReceiver().track().kind().equalsIgnoreCase(mediaStreamTrack.kind())) {
+                                        transceiver.getSender().setTrack(mediaStreamTrack, false);
+                                        transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV);
+                                        sender = transceiver.getSender();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (sender != null) {
+                        WritableMap map = Arguments.createMap();
+                        WritableMap subMap = Arguments.createMap();
+                        map.putString("id", sender.id());
+                        subMap.putString("id", sender.track().id());
+                        subMap.putString("kind", sender.track().kind());
+                        subMap.putString("readyState", (sender.track().state() == MediaStreamTrack.State.LIVE) ? "live" : "ended");
+                        subMap.putBoolean("enabled", sender.track().enabled());
+                        subMap.putBoolean("remote", false); //只能添加本地轨道，远程轨道 RTC 自动添加到收发器（RtpReceiver 里)
+                        map.putMap("track", subMap);
+                        callback.invoke(true, map);
+                    } else {
+                        callback.invoke(false, "add track failed");
+                        Log.e(TAG, "peerConnectionAddTrack() failed");
+                    }
+                } catch (Exception e) {
+                    callback.invoke(false, "add track failed");
+                    Log.e(TAG, "peerConnectionAddTrack() failed");
+                }
+            } else {
+                callback.invoke(false, "Plan-B mode does not allow AddTrack");
+                Log.e(TAG, "Plan-B mode does not allow AddTrack");
+            }
+        } else {
+            callback.invoke(false, "pco == null");
+            Log.e(TAG, "peerConnectionAddTrack() failed");
+        }
+    }
+
+    @ReactMethod
+    public void peerConnectionRemoveTrack(String senderId, int id, Callback callback) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionRemoveTrackAsync(senderId, id, callback));
+    }
+
+    private void peerConnectionRemoveTrackAsync(String senderId, int id, Callback callback) {
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        RtpSender rtpSender = null;
+        if (pco != null) {
+            for (int i = 0; i < pco.getPeerConnection().getSenders().size(); i++) {
+                if (pco.getPeerConnection().getSenders().get(i).id().equalsIgnoreCase(senderId)) {
+                    rtpSender = pco.getPeerConnection().getSenders().get(i);
+                    break;
+                }
+            }
+            if (rtpSender != null) {
+                boolean result = pco.removeTrack(rtpSender);
+                if (result == true) {
+                    callback.invoke(true);
+                } else {
+                    Log.e(TAG, "peerConnectionRemoveTrack() failed");
+                    callback.invoke(false, "peerConnectionRemoveTrack() failed");
+                }
+            } else {
+                Log.e(TAG, "peerConnectionRemoveTrack() rtpSender is null");
+                callback.invoke(false, "rtpSender == null");
+            }
+        } else {
+            Log.e(TAG, "peerConnectionRemoveTrack() failed");
+            callback.invoke(false, "pco == null");
+        }
+    }
+
+    @ReactMethod
+    public void peerConnectionGetRtpSenders(int id, Callback callback) {
+        ThreadUtils.runOnExecutor(() ->
+                peerConnectionGetRtpSendersAsync(id, callback));
+    }
+
+    private void peerConnectionGetRtpSendersAsync(int id, Callback callback) {
+        PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        if (pco != null) {
+            WritableArray array = Arguments.createArray();
+            for (int i = 0; i < pco.getPeerConnection().getSenders().size(); i++) {
+                RtpSender sender = pco.getPeerConnection().getSenders().get(i);
+                if (sender.track() == null) {
+                    continue;
+                } //FLAG: 트랙이 지워졌을때: RtpSender는 존재하고 MediaStreamTrack은 Null이다.
+                WritableMap map = Arguments.createMap();
+                WritableMap subMap = Arguments.createMap();
+                map.putString("id", sender.id());
+                subMap.putString("id", sender.track().id());
+                subMap.putString("kind", sender.track().kind());
+                subMap.putString("readyState", (sender.track().state() == MediaStreamTrack.State.LIVE) ? "live" : "ended");
+                subMap.putBoolean("enabled", sender.track().enabled());
+                subMap.putBoolean("remote", false);
+                map.putMap("track", subMap);
+                array.pushMap(map);
+            }
+            callback.invoke(true, array);
+        } else {
+            Log.e(TAG, "peerConnectionRemoveTrack() failed");
+            callback.invoke(false, "pco == null");
+        }
+    }
+
+
     private ReadableMap serializeState(int id) {
         PeerConnection peerConnection = getPeerConnection(id);
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
         WritableArray transceivers = Arguments.createArray();
-        if (pco.isUnifiedPlan){
+        if (pco.isUnifiedPlan) {
             for (RtpTransceiver transceiver : peerConnection.getTransceivers()) {
                 transceivers.pushMap(serializeTransceiver(pco.resolveTransceiverId(transceiver), transceiver));
             }
@@ -920,7 +1087,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void peerConnectionGetStats(int peerConnectionId, Promise promise) {
         ThreadUtils.runOnExecutor(() ->
-            peerConnectionGetStatsAsync(peerConnectionId, promise));
+                peerConnectionGetStatsAsync(peerConnectionId, promise));
     }
 
     private void peerConnectionGetStatsAsync(int peerConnectionId,
@@ -1032,7 +1199,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
     }
 
-    private RtpTransceiver.RtpTransceiverDirection parseDirection(String src) {
+    private RtpTransceiver.RtpTransceiverDirection parseDirection(String src) throws Error {
         switch (src) {
             case "sendrecv":
                 return RtpTransceiver.RtpTransceiverDirection.SEND_RECV;
@@ -1150,7 +1317,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                 callback.invoke(false, "invalid trackId and type");
                 return;
             }
-            
+
             WritableMap res = Arguments.createMap();
             res.putString("id", transceiverId);
             res.putMap("state", this.serializeState(id));
@@ -1205,7 +1372,8 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             RtpSender sender = transceiver.getSender();
             MediaStreamTrack track = getTrack(trackId);
             sender.setTrack(track, false);
-
+            // FLAG: 방향을 SEND_RECV로 왜 리셋시켜주지.
+            // transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV);
             WritableMap res = Arguments.createMap();
             res.putString("id", transceiverId);
             res.putMap("state", this.serializeState(id));
@@ -1220,17 +1388,23 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     public void peerConnectionTransceiverSetDirection(int id,
                                                       String transceiverId,
                                                       String direction,
+                                                      String kind,
+                                                      boolean isShow,
                                                       final Callback callback) {
         ThreadUtils.runOnExecutor(() ->
-                this.peerConnectionTransceiverSetDirectionAsync(id, transceiverId, direction, callback));
+                this.peerConnectionTransceiverSetDirectionAsync(id, transceiverId, direction, kind, isShow callback));
     }
 
     private void peerConnectionTransceiverSetDirectionAsync(int id,
                                                             String transceiverId,
                                                             String direction,
+                                                            String kind,
+                                                            boolean isShow,
                                                             final Callback callback) {
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
         if (pco != null) {
+            int size = mPeerConnectionObservers.size();
+            try{
             RtpTransceiver transceiver = pco.getTransceiver(transceiverId);
             transceiver.setDirection(this.parseDirection(direction));
 
@@ -1238,6 +1412,14 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             res.putString("id", transceiverId);
             res.putMap("state", this.serializeState(id));
             callback.invoke(true, res);
+            }catch(Error e){
+                Log.e(TAG, "peerConnectionTransceiverSetDirectionAsync: ", e);
+                if(transceiver == null){
+                    callback.invoke(false, "transceiver not found");
+                }else {
+                    callback.invoke(false, this.serializeDirection(transceiver.getDirection()));
+                }
+            }
         } else {
             Log.d(TAG, "peerConnectionTransceiverSetDirection() peerConnection is null");
             callback.invoke(false, "peerConnection is null");
