@@ -93,22 +93,22 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             decoderFactory = options.videoDecoderFactory;
         }
 
-        if (encoderFactory == null || decoderFactory == null) {
-            // Initialize EGL context required for HW acceleration.
-            EglBase.Context eglContext = EglUtils.getRootEglBaseContext();
-
-            if (eglContext != null) {
-                encoderFactory
-                        = new DefaultVideoEncoderFactory(
-                        eglContext,
-                        /* enableIntelVp8Encoder */ true,
-                        /* enableH264HighProfile */ false);
-                decoderFactory = new DefaultVideoDecoderFactory(eglContext);
-            } else {
-                encoderFactory = new SoftwareVideoEncoderFactory();
-                decoderFactory = new SoftwareVideoDecoderFactory();
-            }
-        }
+//         if (encoderFactory == null || decoderFactory == null) {
+//             // Initialize EGL context required for HW acceleration.
+//             EglBase.Context eglContext = EglUtils.getRootEglBaseContext();
+//
+//             if (eglContext != null) {
+//                 encoderFactory
+//                         = new DefaultVideoEncoderFactory(
+//                         eglContext,
+//                         /* enableIntelVp8Encoder */ true,
+//                         /* enableH264HighProfile */ false);
+//                 decoderFactory = new DefaultVideoDecoderFactory(eglContext);
+//             } else {
+        encoderFactory = new SoftwareVideoEncoderFactory();
+        decoderFactory = new SoftwareVideoDecoderFactory();
+//             }
+//         }
 
         if (adm == null) {
             adm = JavaAudioDeviceModule.builder(reactContext).createAudioDeviceModule();
