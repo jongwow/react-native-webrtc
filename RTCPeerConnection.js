@@ -1,5 +1,17 @@
 'use strict';
-
+/*
+* 2에서 추가로 구현한 함수들
+* RTCPeerConnection.addTransceiver()
+* RTCPeerConnection.getTranscievers();
+* RTCRtpTrasceiver.stop()
+* RTCRtpTrasceiver.direction
+* RTCRtpTrasceiver.currentDirection
+* RTCRtpTrasceiver.mid
+* RTCRtpTrasceiver.receiver
+* RTCRtpTrasceiver.sender
+* RTCRtpSender.replaceTrack
+* RTCRtpReceiver.track
+* */
 import EventTarget from 'event-target-shim';
 import { NativeModules, NativeEventEmitter } from 'react-native';
 
@@ -14,6 +26,7 @@ import RTCIceCandidate from './RTCIceCandidate';
 import RTCIceCandidateEvent from './RTCIceCandidateEvent';
 import RTCEvent from './RTCEvent';
 import RTCRtpTransceiver from './RTCRtpTransceiver';
+import RTCRtpSender from "./RTCRtpSender"; // FLAG:추가하면서 이름 바꿈.
 import * as RTCUtil from './RTCUtil';
 import EventEmitter from './EventEmitter';
 
@@ -62,6 +75,8 @@ const PEER_CONNECTION_EVENTS = [
   // old:
   'addstream',
   'removestream',
+    // new:
+   'track', //FLAG: 2에 있어서 조금 바꾸면서 추가함
 ];
 
 let nextPeerConnectionId = 0;
@@ -86,8 +101,13 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
   onaddstream: ?Function;
   onremovestream: ?Function;
 
+  //FLAG: 2에 있어서 조금 바꾸면서 추가함
+  onaddtrack: ?Function;
+  onremovetrack: ?Function;
+
   _peerConnectionId: number;
   _localStreams: Array<MediaStream> = [];
+  _senders: Array<RTCRtpSender> = [];
   _remoteStreams: Array<MediaStream> = [];
   _subscriptions: Array<any>;
   _transceivers: Array<RTCRtpTransceiver> = [];
@@ -104,13 +124,15 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
     this._registerEvents();
   }
 
-  addStream(stream: MediaStream) {
-      const index = this._localStreams.indexOf(stream);
-      if (index !== -1) {
-          return;
-      }
-      WebRTCModule.peerConnectionAddStream(stream._reactTag, this._peerConnectionId);
-      this._localStreams.push(stream);
+  addStream(stream: MediaStream) {// FLAG: callback으로 바꿨으니 callback으로 해주긴 하는데 왜 callback일까?
+      return new Promise((res, rej)=>{
+          const index = this._localStreams.indexOf(stream);
+          if (index !== -1) {
+              return;//TODO: 여기까지 일단 작업 중
+          }
+          WebRTCModule.peerConnectionAddStream(stream._reactTag, this._peerConnectionId);
+          this._localStreams.push(stream);  
+      })
   }
 
   removeStream(stream: MediaStream) {
@@ -242,7 +264,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
             Native bridge which is a bottleneck that tends to be visible in
             the UI when there is congestion involving UI-related passing.
 
-            TODO Implement the logic for filtering the stats based on 
+            TODO Implement the logic for filtering the stats based on
             the sender/receiver
             */
             return new Map(JSON.parse(data));
@@ -297,7 +319,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
         this._getTransceiver(transceiver);
       }
       // Restore Order
-      this._transceivers = 
+      this._transceivers =
         this._transceivers.map((t, i) => this._transceivers.find((t2) => t2.id === state.transceivers[i].id));
     }
   }

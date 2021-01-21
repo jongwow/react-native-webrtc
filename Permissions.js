@@ -86,7 +86,7 @@ class Permissions {
                     granted => resolve(granted ? this.RESULT.GRANTED : this.RESULT.PROMPT),
                     () => resolve(this.RESULT.PROMPT));
             });
-        } else if (Platform.OS === 'ios' || Platform.OS === 'macos') {
+        } else if (Platform.OS === 'ios' || Platform.OS === 'macos') { // FLAG: MacOS 추가됨.
             return WebRTCModule.checkPermission(permissionDesc.name);
         } else {
             return Promise.reject(new TypeError("Unsupported platform."));

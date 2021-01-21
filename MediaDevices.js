@@ -24,6 +24,7 @@ class MediaDevices extends EventTarget(MEDIA_DEVICES_EVENTS) {
         return new Promise(resolve => WebRTCModule.enumerateDevices(resolve));
     }
 
+    //FLAG: 새로 추가된 영역.
     /**
      * W3C "Screen Capture" compatible {@code getDisplayMedia} implementation.
      * See: https://w3c.github.io/mediacapture-screen-share/

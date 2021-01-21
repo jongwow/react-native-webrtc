@@ -139,6 +139,7 @@ export default class MediaStream extends EventTarget(MEDIA_STREAM_EVENTS) {
   }
 
   release(releaseTracks = true) {
+      //FLAG: 이부분이 추가됐는데 왜일까...?
     for (const track of this._tracks) {
       this.removeTrack(track);
       if (releaseTracks) {
