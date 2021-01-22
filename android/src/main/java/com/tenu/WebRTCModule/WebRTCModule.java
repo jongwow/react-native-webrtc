@@ -720,14 +720,14 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
         if (pco != null) {
             if (pco.isUnifiedPlan == true) {
-                //只能添加本地轨道
+                //Only local tracks can be added
                 MediaStreamTrack mediaStreamTrack = getLocalTrack(trackId);
                 if (mediaStreamTrack == null) {
                     Log.d(TAG, "peerConnectionAddTrack() mediaStreamTrack is null(local)");
                     return;
                 }
                 try {
-                    //查找轨道是否有对应的（RtpSender）了
+                    // Find if the track has a corresponding (RtpSender)
                     String addTrackId = mediaStreamTrack.id();
                     RtpSender sender = null;
                     for (RtpSender rtpSender : pco.getPeerConnection().getSenders()) {
@@ -739,7 +739,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                         }
                     }
                     if (sender == null) {
-                        //没有创建收发器，就添加轨道，有收发器，轨道就添加到 RtpSender 里
+                        // If no transceiver is created, add the track, if there is a transceiver, add the track to RtpSender
                         if (pco.getPeerConnection().getTransceivers().size() <= 0) {
                             sender = pco.addTrack(mediaStreamTrack);
                         } else {
@@ -763,7 +763,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                         subMap.putString("kind", sender.track().kind());
                         subMap.putString("readyState", (sender.track().state() == MediaStreamTrack.State.LIVE) ? "live" : "ended");
                         subMap.putBoolean("enabled", sender.track().enabled());
-                        subMap.putBoolean("remote", false); //只能添加本地轨道，远程轨道 RTC 自动添加到收发器（RtpReceiver 里)
+                        subMap.putBoolean("remote", false); // 왜 기본적으로 False? => local Track만 더해지고, remote Track은 여기서 더해지지 않음. remote는 자동적으로 transceiver에 더해짐.
                         map.putMap("track", subMap);
                         callback.invoke(true, map);
                     } else {

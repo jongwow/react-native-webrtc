@@ -26,7 +26,7 @@ import RTCIceCandidate from './RTCIceCandidate';
 import RTCIceCandidateEvent from './RTCIceCandidateEvent';
 import RTCEvent from './RTCEvent';
 import RTCRtpTransceiver from './RTCRtpTransceiver';
-import RTCRtpSender from "./RTCRtpSender"; // FLAG:추가하면서 이름 바꿈.
+import RtpSender from "./RTCRtpSenderTemp"; // FLAG: TODO: 이건 수정해야함. .
 import * as RTCUtil from './RTCUtil';
 import EventEmitter from './EventEmitter';
 
@@ -107,7 +107,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
 
   _peerConnectionId: number;
   _localStreams: Array<MediaStream> = [];
-  _senders: Array<RTCRtpSender> = [];
+  _senders: Array<RtpSender> = [];
   _remoteStreams: Array<MediaStream> = [];
   _subscriptions: Array<any>;
   _transceivers: Array<RTCRtpTransceiver> = [];
@@ -128,11 +128,17 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       return new Promise((res, rej)=>{
           const index = this._localStreams.indexOf(stream);
           if (index !== -1) {
-              return;//TODO: 여기까지 일단 작업 중
+              return;
           }
-          WebRTCModule.peerConnectionAddStream(stream._reactTag, this._peerConnectionId);
+          WebRTCModule.peerConnectionAddStream(stream._reactTag, this._peerConnectionId, (successful, data)=>{
+            if(successful){
+              resolve();
+            }else{
+              reject(data);
+            }
+          });
           this._localStreams.push(stream);  
-      })
+      });
   }
 
   removeStream(stream: MediaStream) {
@@ -144,7 +150,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       WebRTCModule.peerConnectionRemoveStream(stream._reactTag, this._peerConnectionId);
   }
 
-  addTransceiver(source: 'audio' |'video' | MediaStreamTrack, init) {
+  addTransceiver(source: 'audio' |'video' | MediaStreamTrack, init) {//TODO: FLAG: 2꺼 다시 보고 FIX하기
     return new Promise((resolve, reject) => {
 
       let src;
@@ -153,7 +159,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       } else if (source === 'video') {
         src = { type: 'video' };
       } else {
-        src = { trackId: track.id };
+        src = { trackId: source.id }; //FLAG: 이부분에 오타있어서 수정함.
       }
 
       WebRTCModule.peerConnectionAddTransceiver(this._peerConnectionId, {...src, init: { ...init } }, (successful, data) => {
@@ -166,6 +172,56 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       });
     });
   };
+
+  // FLAG: 추가함.
+  addTrack(track: MediaStreamTrack){
+    return new Promise((resolve, reject) => {
+      let sender = this._senders.find((sender) => (sender.track && sender.track().id === track.id));
+      if(sender !== undefined) {
+        return;
+      }
+      WebRTCModule.peerConnectionAddtrack(track.id, this._peerConnectionId, (successful, data)=>{
+        if(successful){
+          const info = {
+            id: data.track.id,
+            kind: data.track.kind,
+            label: data.track.kind, //FLAG: native쪽에서 label에 대한 정보를 안넣음.(없어서일까? 그냥 빼먹은거일까?) WebRTCModule.java의 760번째 코드 참고
+            enabled: data.track.enabled,
+            readyState: data.track.readyState,
+            remote: data.track.remote,
+          };
+          //FLAG: 위에서 let으로 선언해서 그냥 overwrite
+          sender = new RtpSender(data.id, new MediaStreamTrack(info));
+          this._senders.push(sender); // FLAG: 이렇게 해도 안정적인걸까?
+          resolve(sender);
+        }else{
+          reject(data);
+        }
+      })
+    })
+  }
+  removeTrack(sender: RtpSender){
+    return new Promise((resolve, reject)=>{
+      const index = this._senders.indexOf(sender);
+      if(index === -1){
+        return;
+      }
+      WebRTCModule.peerConnectionRemoveTrack(sender.id(),
+        this._peerConnectionId, (successful) => {
+          if(successful){
+            this._senders.splice(index, 1);
+          }
+          resolve(successful);
+        });
+    });
+  }
+  // FLAG: 2에선 왜인지 모르겠지만 w3 명세랑 다른 이름으로 함수를 호출함(getRtpSenders)
+  // 그래서 그냥 이름만 w3 표준이랑 일치시킴.
+  //TODO: 이건 아래쪽에 getTransceiver위치로 옮기기
+  getSenders(){
+    return this._senders.slice();
+  }
+
 
   createOffer(options) {
     return new Promise((resolve, reject) => {
@@ -365,6 +421,15 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
         }
         this.signalingState = ev.signalingState;
         this.dispatchEvent(new RTCEvent('signalingstatechange'));
+      }),
+      EventEmitter.addListener('peerConnectionAddedTrack', ev => {
+        if(ev.id !== this._peerConnectionId){
+          return;
+        }
+        ev.id = ev.trackId;
+        delete ev.trackId;
+        const track = new MediaStreamTrack(ev);
+        this.dispatchEvent(new MediaStreamTrackEvent('track', {track}));
       }),
       EventEmitter.addListener('peerConnectionAddedStream', ev => {
         if (ev.id !== this._peerConnectionId) {
