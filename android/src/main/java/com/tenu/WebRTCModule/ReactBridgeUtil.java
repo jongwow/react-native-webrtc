@@ -1,4 +1,4 @@
-package com.tenu.WebRTCModule;
+package com.oney.WebRTCModule;
 
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableType;

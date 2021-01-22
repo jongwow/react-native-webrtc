@@ -1,4 +1,4 @@
-package com.tenu.WebRTCModule;
+package com.oney.WebRTCModule;
 
 import org.webrtc.PeerConnection;
 import org.webrtc.RTCStats;

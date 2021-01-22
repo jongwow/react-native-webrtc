@@ -1,4 +1,4 @@
-package com.tenu.WebRTCModule;
+package com.oney.WebRTCModule;
 
 import com.facebook.react.uimanager.annotations.ReactProp;
 import com.facebook.react.uimanager.SimpleViewManager;

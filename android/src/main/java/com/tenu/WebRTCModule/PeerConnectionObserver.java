@@ -1,4 +1,4 @@
-package com.tenu.WebRTCModule;
+package com.oney.WebRTCModule;
 
 import java.io.UnsupportedEncodingException;
 import java.lang.ref.SoftReference;
