@@ -180,7 +180,7 @@ export default class RTCPeerConnection extends EventTarget(PEER_CONNECTION_EVENT
       if(sender !== undefined) {
         return;
       }
-      WebRTCModule.peerConnectionAddtrack(track.id, this._peerConnectionId, (successful, data)=>{
+      WebRTCModule.peerConnectionAddTrack(track.id, this._peerConnectionId, (successful, data)=>{
         if(successful){
           const info = {
             id: data.track.id,
