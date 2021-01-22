@@ -147,6 +147,17 @@ class GetUserMediaImpl {
 
         return private_ == null ? null : private_.track;
     }
+    
+    MediaStreamTrack getTrackByType(String type) {
+        for (String key : tracks.keySet()){
+            TrackPrivate private_ = tracks.get(key);
+
+            if(private_.track.kind().equalsIgnoreCase(type)){
+                return private_.track;
+            }
+        }
+        return null;
+    }
 
     /**
      * Implements {@code getUserMedia}. Note that at this point constraints have
@@ -164,10 +175,9 @@ class GetUserMediaImpl {
         //   and has a new syntax/attrs to specify resolution
         //   should change `parseConstraints()` according
         //   see: https://www.w3.org/TR/mediacapture-streams/#idl-def-MediaTrackConstraints
-
+        
         AudioTrack audioTrack = null;
         VideoTrack videoTrack = null;
-
         if (constraints.hasKey("audio")) {
             audioTrack = createAudioTrack(constraints);
         }

@@ -586,7 +586,20 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         }
 
         // Remove and Dispose any tracks ourselves before calling stream.dispose().
-        // 위 문장으로 시작하는 부분은 M87에서 사라짐.
+        //FLAG: 위 문장으로 시작하는 부분은 M87에서 사라졌는데. 일단 오류때문에 다시 만들어봄.
+        List<AudioTrack> audioTracks = new ArrayList<>(stream.audioTracks);
+        for (AudioTrack track : audioTracks) {
+            track.setEnabled(false);
+            stream.removeTrack(track);
+            getUserMediaImpl.disposeTrack(track.id());
+        }
+
+        List<VideoTrack> videoTracks = new ArrayList<>(stream.videoTracks);
+        for (VideoTrack track : videoTracks) {
+            track.setEnabled(false);
+            stream.removeTrack(track);
+            getUserMediaImpl.disposeTrack(track.id());
+        }
 
 
         localStreams.remove(id);
@@ -1392,7 +1405,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                                                       boolean isShow,
                                                       final Callback callback) {
         ThreadUtils.runOnExecutor(() ->
-                this.peerConnectionTransceiverSetDirectionAsync(id, transceiverId, direction, kind, isShow callback));
+                this.peerConnectionTransceiverSetDirectionAsync(id, transceiverId, direction, kind, isShow, callback));
     }
 
     private void peerConnectionTransceiverSetDirectionAsync(int id,
@@ -1402,10 +1415,11 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                                                             boolean isShow,
                                                             final Callback callback) {
         PeerConnectionObserver pco = mPeerConnectionObservers.get(id);
+        RtpTransceiver transceiver = null;
         if (pco != null) {
             int size = mPeerConnectionObservers.size();
             try{
-            RtpTransceiver transceiver = pco.getTransceiver(transceiverId);
+            transceiver = pco.getTransceiver(transceiverId);
             transceiver.setDirection(this.parseDirection(direction));
 
             WritableMap res = Arguments.createMap();

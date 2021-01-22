@@ -138,15 +138,23 @@ export default class MediaStream extends EventTarget(MEDIA_STREAM_EVENTS) {
     return this._reactTag;
   }
 
-  release(releaseTracks = true) {
-      //FLAG: 이부분이 추가됐는데 왜일까...?
-    for (const track of this._tracks) {
-      this.removeTrack(track);
-      if (releaseTracks) {
-        track.release();
-      }
+  release(isUnified = true) { //TODO: 내가 임의로 수정해봄
+    if(isUnified){
+      for (const track of this._tracks) {
+        this.removeTrack(track);
+        // track.release();
+      } 
+    }else{
+      WebRTCModule.mediaStreamRelease(this._reactTag);
     }
+      //FLAG: M87에선 이부분이 추가됐지만 왜인지 오류가 나서 다시 WebRTCModule쪽으로 내려봄.
+    // for (const track of this._tracks) {
+    //   this.removeTrack(track);
+    //   if (releaseTracks) {
+    //     track.release();
+    //   }
+    // }
 
-    WebRTCModule.mediaStreamRelease(this._reactTag);
+    
   }
 }
